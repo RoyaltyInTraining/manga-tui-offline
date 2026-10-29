@@ -120,8 +120,11 @@ pub struct PagesListState {
 
 impl PagesListState {
     pub fn new(page_bookmarked: Option<usize>) -> Self {
+        let mut list_state = tui_widget_list::ListState::default();
+        list_state.select(page_bookmarked);
+
         Self {
-            list_state: tui_widget_list::ListState::default(),
+            list_state,
             page_bookmarked,
         }
     }
@@ -172,6 +175,13 @@ mod tests {
         let page_item = page_list.pages[1].clone();
 
         assert_eq!(*STYLE_PAGE_BOOKMARKED, page_item.style);
+    }
+
+    #[test]
+    fn it_selects_the_bookmarked_page_without_rendering_the_list() {
+        let state = PagesListState::new(Some(3));
+
+        assert_eq!(Some(3), state.list_state.selected);
     }
 
     #[test]
