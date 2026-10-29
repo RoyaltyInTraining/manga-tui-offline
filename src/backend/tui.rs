@@ -1,7 +1,9 @@
 use std::error::Error;
+use std::io::stdout;
 use std::time::Duration;
 
-use crossterm::event::{KeyEvent, MouseEvent};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture, KeyEvent, MouseEvent};
+use crossterm::execute;
 use futures::{FutureExt, StreamExt};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
@@ -32,6 +34,64 @@ pub enum Events {
     LocalLibraryReloaded,
     Error(String),
     ReadChapter(ChapterToRead, MangaToRead),
+}
+
+/// Puts the terminal back into the state it had before the app started.
+///
+/// Mouse capture is disabled first and foremost: `ratatui::restore` only disables raw mode and
+/// leaves the alternate screen, it knows nothing about the mouse reporting that crossterm enabled.
+/// If mouse capture is left on, every mouse movement after the app exits is reported as an escape
+/// sequence (for example `\x1b[<35;10;5M`) and that is printed by the shell as control characters.
+pub fn restore_terminal() {
+    let _ = execute!(stdout(), DisableMouseCapture);
+    ratatui::restore();
+}
+
+/// Owns the terminal for as long as the app is running and restores it on `Drop`.
+///
+/// Restoring on `Drop` means the terminal is cleaned up on every exit path: when `main` returns
+/// early because of a `?` error, when a panic unwinds the stack, and on a normal quit.
+pub struct TerminalSession {
+    restored: bool,
+}
+
+impl TerminalSession {
+    /// Enables mouse capture and installs a panic hook that restores the terminal.
+    ///
+    /// Call this before `ratatui::init` so that a failure while initializing the terminal is also
+    /// cleaned up by this guard.
+    pub fn start() -> std::io::Result<(Self, ratatui::DefaultTerminal)> {
+        execute!(stdout(), EnableMouseCapture)?;
+
+        // `ratatui::init` installs its own panic hook that disables raw mode and leaves the
+        // alternate screen, but it does not disable mouse capture, so on its own it leaves the
+        // terminal reporting mouse events. Wrap whatever hook is installed so that mouse capture
+        // (and the rest of the terminal state) is always restored before the panic is reported.
+        let previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            restore_terminal();
+            previous_hook(panic_info);
+        }));
+
+        let terminal = ratatui::init();
+
+        Ok((Self { restored: false }, terminal))
+    }
+
+    pub fn restore(&mut self) {
+        if self.restored {
+            return;
+        }
+
+        self.restored = true;
+        restore_terminal();
+    }
+}
+
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        self.restore();
+    }
 }
 
 #[cfg(unix)]

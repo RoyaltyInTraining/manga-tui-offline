@@ -3,15 +3,13 @@
 #![allow(deprecated)]
 #![allow(clippy::single_match)]
 
-use std::io::stdout;
 use std::path::PathBuf;
 use std::process::exit;
 
 use backend::manga_provider::local::{LocalFilterWidget, LocalFiltersProvider, LocalProvider};
 use backend::tracker::DisabledTracker;
+use backend::tui::TerminalSession;
 use clap::Parser;
-use crossterm::ExecutableCommand;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use directories::UserDirs;
 use log::LevelFilter;
 use logger::{ILogger, Logger};
@@ -61,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             format!(
             "Data directory could not be created, this is where your manga history and manga downloads is stored
              \n this could be for many reasons such as the application not having enough permissions
-            \n Try setting the environment variable `MANGA_TUI_DATA_DIR` to some path pointing to a directory, example: /home/user/somedirectory 
+            \n Try setting the environment variable `MANGA_TUI_DATA_DIR` to some path pointing to a directory, example: /home/user/somedirectory
             \n Error details : {e}"
         ).into()
             );
@@ -84,25 +82,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(connection);
 
     color_eyre::install()?;
-    stdout().execute(EnableMouseCapture)?;
 
     if !local_path.exists() {
         logger.error("Local manga library not found.\nSet MANGA_TUI_LIBRARY_DIR or run `manga-tui --local <path>`.".into());
         exit(1)
     }
 
-    logger.inform("Using local manga library");
-    run_app(
-        ratatui::init(),
-        LocalProvider::from_path(local_path)?,
-        Option::<DisabledTracker>::None,
-        LocalFiltersProvider::new(),
-        LocalFilterWidget::new(),
-    )
-    .await?;
+    // Load the library before taking over the terminal: if the path holds nothing this app can
+    // read, the app must fail while the terminal is still untouched instead of leaving raw mode,
+    // the alternate screen and mouse reporting enabled.
+    let provider = LocalProvider::from_path(local_path)?;
 
-    ratatui::restore();
-    stdout().execute(DisableMouseCapture)?;
+    logger.inform("Using local manga library");
+
+    // The session restores the terminal when it is dropped, so it is restored no matter whether
+    // the app quits normally, returns an error or panics.
+    let (mut session, terminal) = TerminalSession::start()?;
+
+    run_app(terminal, provider, Option::<DisabledTracker>::None, LocalFiltersProvider::new(), LocalFilterWidget::new()).await?;
+
+    session.restore();
 
     Ok(())
 }
