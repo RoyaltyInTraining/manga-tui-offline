@@ -271,12 +271,20 @@ where
     }
 
     fn next_page(&mut self) {
-        self.page_list_state.list_state.next();
+        if self.pages.is_empty() {
+            return;
+        }
+        let next = (self.current_page_index() + 1).min(self.pages.len() - 1);
+        self.page_list_state.list_state.select(Some(next));
         self.fetch_pages();
     }
 
     fn previous_page(&mut self) {
-        self.page_list_state.list_state.previous();
+        if self.pages.is_empty() {
+            return;
+        }
+        let previous = self.current_page_index().saturating_sub(1);
+        self.page_list_state.list_state.select(Some(previous));
         self.fetch_pages();
     }
 
@@ -879,26 +887,24 @@ mod test {
             initialize_reader_page(ReaderPageProvierMock::new().into());
 
         reader_page.pages_list = PagesList::new(vec![PagesItem::new(0), PagesItem::new(1), PagesItem::new(2)]);
+        reader_page.pages = vec![Page::new(), Page::new(), Page::new()];
 
-        let area = Rect::new(0, 0, 20, 20);
-        let mut buf = Buffer::empty(area);
+        // The page list is not rendered anymore, so navigation must not depend on
+        // `tui_widget_list` learning the number of elements during a render.
+        let action = MangaReaderActions::NextPage;
+        reader_page.update(action);
 
-        reader_page.render_page_list(area, &mut buf);
+        assert_eq!(Some(1), reader_page.page_list_state.list_state.selected);
 
         let action = MangaReaderActions::NextPage;
         reader_page.update(action);
 
-        assert_eq!(0, reader_page.page_list_state.list_state.selected.expect("no page is selected"));
-
-        let action = MangaReaderActions::NextPage;
-        reader_page.update(action);
-
-        assert_eq!(1, reader_page.page_list_state.list_state.selected.expect("no page is selected"));
+        assert_eq!(Some(2), reader_page.page_list_state.list_state.selected);
 
         let action = MangaReaderActions::PreviousPage;
         reader_page.update(action);
 
-        assert_eq!(0, reader_page.page_list_state.list_state.selected.expect("no page is selected"));
+        assert_eq!(Some(1), reader_page.page_list_state.list_state.selected);
     }
 
     #[tokio::test]
